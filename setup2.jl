@@ -114,21 +114,25 @@ jac_sparsity = Float64.(sparse(sparsity_pattern));
 f = ODEFunction(rhs_flux!;jac_prototype=jac_sparsity);
 prob_sparse = ODEProblem(f, θ0, (t0,tf), p);
 
-
+### Fixing the timestep for all algorithms
 println("Default")
-@btime solve(prob, save_every_step =false);
+@btime solve(prob, dt= dt, save_every_step =false, adaptive = false);
 println("Rosenbrock23 - finite diff Jacobian")
-@btime solve(prob, Rosenbrock23(autodiff=false,diff_type=Val{:central}), save_every_step = false);
-
+@btime solve(prob, Rosenbrock23(autodiff=false,diff_type=Val{:central}), dt= dt, save_every_step = false, adaptive = false);
+println("Implicit Euler, FD")
+@btime solve(prob, ImplicitEuler(autodiff=false,diff_type=Val{:central}), dt= dt, save_every_step = false, adaptive = false);
 println("Default, sparse")
-@btime solve(prob_sparse, save_every_step = false);
+@btime solve(prob_sparse, dt= dt, save_every_step = false, adaptive = false);
 println("Rosenbrock FD, sparse")
-@btime solve(prob_sparse, Rosenbrock23(autodiff=false,diff_type=Val{:central}), save_every_step = false);
+@btime solve(prob_sparse, Rosenbrock23(autodiff=false,diff_type=Val{:central}), dt= dt, save_every_step = false, adaptive = false);
 println("ImplicitEuler FD, sparse")
-@btime solve(prob_sparse, ImplicitEuler(autodiff=false,diff_type=Val{:central}), save_every_step = false);
+@btime solve(prob_sparse, ImplicitEuler(autodiff=false,diff_type=Val{:central}), dt= dt, save_every_step = false, adaptive = false);
 println("KenCarp4 FD, sparse")
-@btime solve(prob_sparse, KenCarp4(autodiff=false,diff_type=Val{:central}), save_every_step = false);
-@btime solve(prob, SSPRK33(), dt = dt);
+@btime solve(prob_sparse, KenCarp4(autodiff=false,diff_type=Val{:central}), dt= dt, save_every_step = false, adaptive = false);
+println("SSPRK33")
+@btime solve(prob, SSPRK33(), dt = dt, save_every_step = false, adaptive = false);
+println("Forward Euler")
+@btime solve(prob, Euler(), dt = dt, save_every_step = false, adaptive = false);
 
 
 #de = modelingtoolkitize(prob)
