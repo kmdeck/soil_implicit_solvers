@@ -60,10 +60,10 @@ prob = ODEProblem(rhs_flux!, θ0, (t0, tf), p);
 
 @btime solve(prob);
 #@btime solve(prob, Rosenbrock23())
-@btime solve(prob, Rosenbrock23(autodiff=false,diff_type=Val{:central}));
+#@btime solve(prob, Rosenbrock23(autodiff=false,diff_type=Val{:central}));
 
 
-input = rand(n,n,1)
+input = rand(n)
 output = similar(input)
 sparsity_pattern = jacobian_sparsity(rhs_flux!, output, input, p, 0.0)
 #de = modelingtoolkitize(prob)
