@@ -25,7 +25,7 @@ end
 
 function effective_saturation(porosity::FT, ϑ_l::FT, θr::FT) where {FT}
     ϑ_l_safe = max(ϑ_l, θr + eps(FT))
-    S_l = (ϑ_l_safe - θr) / (porosity - θr)
+    S_l::FT = (ϑ_l_safe - θr) / (porosity - θr)
     return S_l
 end
 
@@ -85,20 +85,28 @@ t0 = ft(0);
 tf = ft(60 * 60 * 24 * 36);
 dt = ft(100);
 θ0 =  ft(0.494) .+ zeros(n)
-K = zeros(n)
-ψ = zeros(n)
-F = zeros(n)
+
+
+
+
 function rhs_flux!(dY, Y, p, t)
-    ν, vg_α, vg_n, vg_m, Ksat, S_s, θ_r, top_flux_bc, bot_flux_bc = p
-    @. K =  hydraulic_conductivity(Ksat,vg_m,
-                                       effective_saturation(ν, Y, θ_r)
-                                   )
-    @. ψ = pressure_head(vg_α,vg_n,vg_m, θ_r,Y, ν, S_s) + z
+    ν,
+    vg_α,
+    vg_n,
+    vg_m,
+    Ksat,
+    S_s,
+    θ_r,
+    top_flux_bc,
+    bot_flux_bc = p
+    K =  hydraulic_conductivity.(Ksat,vg_m,
+                                 effective_saturation.(ν, Y, θ_r))
+    ψ = pressure_head.(vg_α,vg_n,vg_m, θ_r,Y, ν, S_s) .+ z
 
     @inbounds for i in 1:1:50
         ip1, im1 = i+1, i-1
-        Fi_ph = ip1 == n+1 ? ft(top_flux_bc) : ft(-2.0)/(ft(1.0)/K[ip1]+ft(1.0)/K[i])*(ψ[ip1]-ψ[i])/Δz
-        Fi_mh = im1  == 0 ? ft(bot_flux_bc) : ft(-2.0)/(ft(1.0)/K[i]+ft(1.0)/K[im1])*(ψ[i]-ψ[im1])/Δz
+        Fi_ph::ft = ip1 == n+1 ? ft.(top_flux_bc) : ft(-2.0)/(ft(1.0)/K[ip1]+ft(1.0)/K[i])*(ψ[ip1]-ψ[i])/Δz
+        Fi_mh::ft = im1  == 0 ? ft.(bot_flux_bc) : ft(-2.0)/(ft(1.0)/K[i]+ft(1.0)/K[im1])*(ψ[i]-ψ[im1])/Δz
         dY[i] = -ft(1.0)/Δz*(Fi_ph-Fi_mh)
     end
 
@@ -106,15 +114,48 @@ function rhs_flux!(dY, Y, p, t)
 end
 
 prob = ODEProblem(rhs_flux!, θ0, (t0, tf), p);
-input = rand(n);
-output = similar(input);
 # this is cool, but it's just tridiagnol -dont need it?
-sparsity_pattern = jacobian_sparsity(rhs_flux!, output, input, p, 0.0);
-jac_sparsity = Float64.(sparse(sparsity_pattern));
+#input = rand(n);
+#output = similar(input);
+#sparsity_pattern = jacobian_sparsity(rhs_flux!, output, input, p, 0.0);
+#jac_sparsity = Float64.(sparse(sparsity_pattern));
+
+i = Array(1:1:n)
+iu = Array(1:1:n-1)
+il = Array(2:1:n)
+i1 = vcat(i,iu,il)
+i2 = vcat(i,il,iu)
+jac_sparsity = sparse(i1,i2, 1.0)
 f = ODEFunction(rhs_flux!;jac_prototype=jac_sparsity);
 prob_sparse = ODEProblem(f, θ0, (t0,tf), p);
 
+
+## Which timestep we can use for same level of error
+truth = solve(prob, dt = 1.0,SSPRK33(),save_every_step =false)
+u = truth.u[end]
+ts = ft.([10, 30, 100, 300])
+errorI = ft.([0,0,0,0])
+merrI = ft.([0,0,0,0])
+for i in [1,2,3,4]
+    println(i)
+    sol = solve(prob_sparse, ImplicitEuler(autodiff=false,diff_type=Val{:central}), dt= ts[i], save_every_step = false, adaptive = false)
+    errorI[i] = sqrt(sum((sol.u[end] .-u).^2.0))
+    merrI[i] = maximum(sol.u[end].-u)
+end
+errorE = ft.([0,0,0,0])
+merrE = ft.([0,0,0,0])
+for i in [1,2,3,4]
+    println(i)
+    sol = solve(prob, Euler(), dt= ts[i], save_every_step = false, adaptive = false)
+    errorE[i] = sqrt(sum((sol.u[end] .-u).^2.0))
+    merrE[i] = maximum(sol.u[end].-u)
+end
+#Both ~break at 300s. -> ImplictEuler would be slower. Moreover,
+# it doesn't let us take a larger step.
+
+
 ### Fixing the timestep for all algorithms
+#=
 println("Default")
 @btime solve(prob, dt= dt, save_every_step =false, adaptive = false);
 println("Rosenbrock23 - finite diff Jacobian")
@@ -133,9 +174,53 @@ println("SSPRK33")
 @btime solve(prob, SSPRK33(), dt = dt, save_every_step = false, adaptive = false);
 println("Forward Euler")
 @btime solve(prob, Euler(), dt = dt, save_every_step = false, adaptive = false);
+=#
 
 
+#forward diff not working for me.
 #de = modelingtoolkitize(prob)
 #jac = eval(ModelingToolkit.generate_jacobian(de)[2])
 #f = ODEFunction(rhs_flux!, jac=jac)
 #prob_jac = ODEProblem(f, θ0, (t0, tf), p)
+
+
+
+
+
+
+######### Speeding up the RHS eval
+#rhs_flux has allocations:
+#=
+
+julia> @btime rhs_flux!(dθ,θ0,p,0.0)
+  7.761 μs (2 allocations: 992 bytes)
+=#
+
+#= Reduce allocations:
+function rhs_flux2!(dY, Y, p, t)
+    ν,
+    vg_α,
+    vg_n,
+    vg_m,
+    Ksat,
+    S_s,
+    θ_r,
+    top_flux_bc,
+    bot_flux_bc = p
+    K =  @SVector [hydraulic_conductivity(Ksat,vg_m,
+                                       effective_saturation(ν, Y[i], θ_r)) for i in 1:1:50]
+                                   
+    ψ = @SVector [pressure_head(vg_α,vg_n,vg_m, θ_r,Y[i], ν, S_s) + z[i] for i in 1:1:50]
+
+    @inbounds for i in 1:1:50
+        ip1, im1 = i+1, i-1
+        Fi_ph::ft = ip1 == n+1 ? ft.(top_flux_bc) : ft(-2.0)/(ft(1.0)/K[ip1]+ft(1.0)/K[i])*(ψ[ip1]-ψ[i])/Δz
+        Fi_mh::ft = im1  == 0 ? ft.(bot_flux_bc) : ft(-2.0)/(ft(1.0)/K[i]+ft(1.0)/K[im1])*(ψ[i]-ψ[im1])/Δz
+        dY[i] = -ft(1.0)/Δz*(Fi_ph-Fi_mh)
+    end
+end
+
+julia> @btime rhs_flux2!(dθ,θ0,p,0.0)
+  7.631 μs (0 allocations: 0 bytes)
+ b/c now three loops...?
+=#
