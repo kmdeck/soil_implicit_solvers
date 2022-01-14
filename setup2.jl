@@ -2,9 +2,8 @@ using DifferentialEquations
 using OrdinaryDiffEq:
     ODEProblem,
     solve,
-    Rosenbrock23,
-    KenCarp4,
-    ImplicitEuler
+    ImplicitEuler,
+    Euler
 using ModelingToolkit
 using BenchmarkTools
 using SparsityDetection, SparseArrays
